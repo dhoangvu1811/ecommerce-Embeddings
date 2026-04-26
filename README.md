@@ -2,10 +2,18 @@
 
 Microservice **Python (FastAPI)** cho **embedding sản phẩm**, **index Qdrant** và API **`POST /v1/embed`** dùng chung cho RAG (client: n8n workflow). Hỗ trợ:
 
-- **Backend embedding `local`**: [sentence-transformers](https://www.sentence-transformers.org/) (mặc định, chạy offline, phù hợp dev local không API key).
-- **Backend `protonx`**: [ProtonX Embeddings API](https://protonx.co/embeddings_models.html) qua package `protonx` + `PROTONX_API_KEY`.
+- **Backend embedding `local`**: [sentence-transformers](https://www.sentence-transformers.org/) (mặc định khi `APP_ENV=local/dev`, chạy offline, phù hợp dev local không API key).
+- **Backend `protonx`**: [ProtonX Embeddings API](https://protonx.co/embeddings_models.html) qua package `protonx` + `PROTONX_API_KEY` (mặc định khi `APP_ENV=production`).
 
 Commerce-Api gọi dịch vụ này khi cần reindex vector (debounce); luồng chat đi qua **n8n** → embed → Qdrant → Ollama.
+
+## Cấu hình backend theo môi trường
+
+- Local/dev: đặt `APP_ENV=local` (hoặc `dev`), backend mặc định là Sentence Transformers.
+- Production: đặt `APP_ENV=production`, backend mặc định là ProtonX.
+- `EMBEDDING_BACKEND` là biến override tùy chọn; khuyến nghị vẫn để đúng theo môi trường (`local` cho local/dev, `protonx` cho production).
+- Nếu backend hiệu lực là `protonx` thì `PROTONX_API_KEY` là bắt buộc.
+- Có thể kiểm tra backend hiệu lực bằng `GET /health` (trả về `app_env` và `embedding_backend`).
 
 ## Vị trí trong hệ sinh thái
 
@@ -43,20 +51,41 @@ flowchart LR
 
 3. Copy `.env.example` → `.env` trong thư mục này và chỉnh `DATABASE_URL` trùng Commerce-Api.
 
-4. Cài Python 3.11+ (khuyến nghị) và:
+4. **Python venv** (khuyến nghị, Python 3.11+). Từ thư mục `ecommerce-Embeddings`:
+
+   **Windows (PowerShell)**
+
+   ```powershell
+   py -3.11 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+   **macOS / Linux**
 
    ```bash
+   python3.11 -m venv .venv
+   source .venv/bin/activate
+   pip install --upgrade pip
    pip install -r requirements.txt
+   ```
+
+   Mỗi phiên làm việc mới: kích hoạt lại `.venv` rồi chạy lệnh bên dưới.
+
+5. Chạy API:
+
+   ```bash
    uvicorn app.main:app --host 0.0.0.0 --port 8030 --reload
    ```
 
-5. Khởi tạo collection Qdrant (sau khi service chạy một lần để tạo model):
+6. Khởi tạo collection Qdrant (venv đã kích hoạt; sau khi model embedding tải xong lần đầu):
 
    ```bash
    python scripts/init_qdrant_collection.py
    ```
 
-6. Index sản phẩm:
+7. Index sản phẩm:
 
    ```bash
    curl -X POST http://localhost:8030/v1/index/reindex -H "Content-Type: application/json" -H "X-Reindex-Key: YOUR_SECRET_IF_SET" -d "{}"
@@ -66,7 +95,8 @@ flowchart LR
 
 | Biến | Mô tả |
 |------|--------|
-| `EMBEDDING_BACKEND` | `local` \| `protonx` |
+| `APP_ENV` | `local` \| `dev` \| `production` (quy định backend mặc định) |
+| `EMBEDDING_BACKEND` | Override tùy chọn: `local` \| `protonx` |
 | `PROTONX_API_KEY` | Bắt buộc nếu `protonx` |
 | `QDRANT_URL` | VD `http://localhost:6333` |
 | `QDRANT_COLLECTION` | VD `products_v1` |

@@ -8,6 +8,8 @@
 
 ## Secrets
 
+- `APP_ENV=production` — ép service chạy theo profile production.
+- `EMBEDDING_BACKEND=protonx` (hoặc để trống để service tự resolve theo `APP_ENV`).
 - `EMBEDDINGS_REINDEX_SECRET` — khớp Commerce-Api `EMBEDDINGS_REINDEX_SECRET` và header `X-Reindex-Key`.
 - `PROTONX_API_KEY` — nếu dùng backend `protonx`.
 - `N8N_AI_CHAT_WEBHOOK_URL` — URL production của n8n (HTTPS).

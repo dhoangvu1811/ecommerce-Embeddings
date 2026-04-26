@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.config import Settings, get_settings
+from app.config import Settings
 
 _local_model: Any = None
 _protonx_client: Any = None
@@ -40,7 +40,7 @@ def detect_vector_size(settings: Settings) -> int:
 def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    backend = settings.embedding_backend
+    backend = settings.resolved_embedding_backend
     if backend == "local":
         model = _get_local_model(settings)
         out = model.encode(
@@ -52,6 +52,10 @@ def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
         return [row.astype(float).tolist() for row in out]
 
     # protonx cloud API
+    if not (settings.protonx_api_key or "").strip():
+        raise ValueError(
+            "Resolved backend protonx requires PROTONX_API_KEY in environment."
+        )
     client = _get_protonx(settings)
     resp = client.embeddings.create(input=texts)
     return _parse_protonx_response(resp, len(texts))

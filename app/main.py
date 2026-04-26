@@ -56,7 +56,8 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "embedding_backend": settings.embedding_backend,
+        "app_env": settings.app_env,
+        "embedding_backend": settings.resolved_embedding_backend,
         "collection": settings.qdrant_collection,
     }
 
@@ -72,11 +73,12 @@ def embed_body(body: EmbedRequest) -> dict[str, Any]:
     if not texts:
         raise HTTPException(status_code=400, detail="Cần `text` hoặc `inputs`")
 
+    backend = settings.resolved_embedding_backend
     vectors = embedding_provider.embed_texts(settings, texts)
     dim = len(vectors[0]) if vectors else 0
     return {
         "model": settings.embedding_local_model
-        if settings.embedding_backend == "local"
+        if backend == "local"
         else "protonx",
         "dimensions": dim,
         "embeddings": vectors,
