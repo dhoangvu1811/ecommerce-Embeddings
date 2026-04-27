@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -90,19 +90,34 @@ def embed_body(body: EmbedRequest) -> dict[str, Any]:
 def reindex(
     body: ReindexRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     x_reindex_key: str | None = Header(default=None, alias="X-Reindex-Key"),
 ) -> dict[str, Any]:
     _check_reindex_secret(request, x_reindex_key)
     settings = get_settings()
-    try:
-        result = index_products(
-            settings,
-            product_id=body.product_id,
-            full_reset=body.full_reset,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    return {"code": 200, "message": "OK", "data": result}
+
+    def run_indexing():
+        try:
+            # Thực hiện index thực tế ở background
+            index_products(
+                settings,
+                product_id=body.product_id,
+                full_reset=body.full_reset,
+            )
+        except Exception as e:
+            # Log lỗi nếu cần (vì chạy background nên không raise HTTPException được)
+            print(f"Background indexing error: {e}")
+
+    background_tasks.add_task(run_indexing)
+
+    return {
+        "code": 202,
+        "message": "Reindexing started in background. Please check logs for completion.",
+        "data": {
+            "product_id": body.product_id,
+            "full_reset": body.full_reset,
+        },
+    }
 
 
 @app.post("/v1/search")
