@@ -40,9 +40,9 @@ def index_products(
         ensure_collection(client, settings.qdrant_collection, vec_size)
 
     if product_id is not None:
-        rows = fetch_product_by_id(settings.database_url, product_id)
-        products = [rows] if rows else []
-        if rows and client.collection_exists(settings.qdrant_collection):
+        row = fetch_product_by_id(settings.database_url, product_id)
+        products_iter = [row] if row else []
+        if row and client.collection_exists(settings.qdrant_collection):
             client.delete(
                 collection_name=settings.qdrant_collection,
                 points_selector=FilterSelector(
@@ -57,12 +57,42 @@ def index_products(
                 ),
             )
     else:
-        products = fetch_active_products(settings.database_url)
+        products_iter = fetch_active_products(settings.database_url)
 
-    texts: list[str] = []
-    meta: list[dict[str, Any]] = []
+    batch_size = max(1, int(settings.embedding_batch_size))
+    current_texts: list[str] = []
+    current_meta: list[dict[str, Any]] = []
+    
+    total_indexed_chunks = 0
+    total_products = 0
 
-    for row in products:
+    def flush_batch():
+        nonlocal total_indexed_chunks
+        if not current_texts:
+            return
+        
+        embeddings = embedding_provider.embed_texts(settings, current_texts)
+        points: list[PointStruct] = []
+        for emb, m in zip(embeddings, current_meta, strict=True):
+            points.append(
+                PointStruct(id=int(m["id"]), vector=emb, payload=m["payload"])
+            )
+
+        upsert_points(client, settings.qdrant_collection, points)
+        total_indexed_chunks += len(points)
+        
+        # Clear batch buffers to free memory
+        current_texts.clear()
+        current_meta.clear()
+
+        # Rate limiting for ProtonX
+        if settings.resolved_embedding_backend == "protonx":
+            delay_s = max(0.0, float(settings.embedding_batch_delay_seconds))
+            if delay_s > 0:
+                time.sleep(delay_s)
+
+    for row in products_iter:
+        total_products += 1
         pid = int(row["id"])
         doc = build_product_document(row)
         chunks = chunk_text(
@@ -72,8 +102,8 @@ def index_products(
         )
         if not chunks:
             chunks = [doc[: settings.chunk_max_chars]]
+            
         for idx, ch in enumerate(chunks):
-            # Qdrant point id: unsigned int (unique per product chunk)
             point_id = pid * 10_000 + idx
             url = _store_url(settings, str(row.get("slug") or ""), pid)
             payload = {
@@ -88,39 +118,18 @@ def index_products(
                 "text": ch,
                 "updated_at": str(row.get("updated_at") or ""),
             }
-            texts.append(ch)
-            meta.append({"id": point_id, "payload": payload})
+            current_texts.append(ch)
+            current_meta.append({"id": point_id, "payload": payload})
+            
+            # Nếu đủ một batch thì xử lý ngay để giải phóng RAM
+            if len(current_texts) >= batch_size:
+                flush_batch()
 
-    if not texts:
-        return {"indexedChunks": 0, "indexedProducts": len(products), "message": "no products"}
-
-    indexed_chunks = 0
-    batch_size = max(1, int(settings.embedding_batch_size))
-
-    # Embed theo lô để tránh vượt token limit của provider khi catalog lớn.
-    for text_batch, meta_batch in zip(
-        _iter_batches(texts, batch_size),
-        _iter_batches(meta, batch_size),
-        strict=True,
-    ):
-        embeddings = embedding_provider.embed_texts(settings, text_batch)
-        points: list[PointStruct] = []
-        for emb, m in zip(embeddings, meta_batch, strict=True):
-            points.append(
-                PointStruct(id=int(m["id"]), vector=emb, payload=m["payload"])
-            )
-
-        upsert_points(client, settings.qdrant_collection, points)
-        indexed_chunks += len(points)
-
-        # ProtonX có giới hạn request/phút, giãn nhịp giữa các batch để tránh 429.
-        if settings.resolved_embedding_backend == "protonx":
-            delay_s = max(0.0, float(settings.embedding_batch_delay_seconds))
-            if delay_s > 0:
-                time.sleep(delay_s)
+    # Xử lý phần dư cuối cùng
+    flush_batch()
 
     return {
-        "indexedChunks": indexed_chunks,
-        "indexedProducts": len(products),
+        "indexedChunks": total_indexed_chunks,
+        "indexedProducts": total_products,
         "collection": settings.qdrant_collection,
     }

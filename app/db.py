@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 from app.config import Settings
 
 
-def fetch_active_products(conn_url: str) -> list[dict[str, Any]]:
+def fetch_active_products(conn_url: str):
     query = """
         SELECT
             p.id,
@@ -30,8 +30,8 @@ def fetch_active_products(conn_url: str) -> list[dict[str, Any]]:
     with psycopg.connect(conn_url, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute(query)
-            rows = cur.fetchall()
-    return [dict(r) for r in rows]
+            for row in cur:
+                yield dict(row)
 
 
 def fetch_product_by_id(conn_url: str, product_id: int) -> dict[str, Any] | None:
