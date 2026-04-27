@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
 from app.config import Settings
 
 _local_model: Any = None
 _protonx_client: Any = None
+_EMBEDDING_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embedding-provider")
 
 
 def _get_local_model(settings: Settings):
@@ -57,8 +59,20 @@ def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
             "Resolved backend protonx requires PROTONX_API_KEY in environment."
         )
     client = _get_protonx(settings)
-    resp = client.embeddings.create(input=texts)
-    return _parse_protonx_response(resp, len(texts))
+
+    timeout_seconds = max(1.0, float(settings.embedding_request_timeout_seconds))
+
+    def _call_protonx() -> list[list[float]]:
+        resp = client.embeddings.create(input=texts)
+        return _parse_protonx_response(resp, len(texts))
+
+    future = _EMBEDDING_EXECUTOR.submit(_call_protonx)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FuturesTimeoutError as exc:
+        raise TimeoutError(
+            f"ProtonX embedding request timed out after {timeout_seconds:.0f}s"
+        ) from exc
 
 
 def _parse_protonx_response(resp: dict[str, Any], expected: int) -> list[list[float]]:

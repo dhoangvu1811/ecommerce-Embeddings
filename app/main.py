@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import time
 from typing import Any
+from datetime import datetime, timezone
+from threading import Lock, Thread
+from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -16,6 +20,73 @@ app = FastAPI(
     version="1.0.0",
     description="Embeddings, Qdrant index, and /v1/embed for RAG",
 )
+
+_reindex_lock = Lock()
+_reindex_state: dict[str, Any] = {
+    "running": False,
+    "queued": False,
+    "currentJobId": None,
+    "lastJobId": None,
+    "lastRequestAt": None,
+    "lastStartedAt": None,
+    "lastFinishedAt": None,
+    "lastSuccessAt": None,
+    "lastDurationMs": None,
+    "lastError": None,
+    "lastResult": None,
+}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _snapshot_reindex_state() -> dict[str, Any]:
+    with _reindex_lock:
+        return dict(_reindex_state)
+
+
+def _run_reindex_worker(settings, body: ReindexRequest, job_id: str) -> None:
+    while True:
+        started_at = time.monotonic()
+        started_iso = _utc_now_iso()
+        run_result: dict[str, Any] | None = None
+        run_error: str | None = None
+
+        try:
+            run_result = index_products(
+                settings,
+                product_id=body.product_id,
+                full_reset=body.full_reset,
+            )
+        except Exception as exc:
+            run_error = str(exc)
+            print(f"[reindex] job={job_id} failed: {exc}")
+
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        finished_iso = _utc_now_iso()
+
+        with _reindex_lock:
+            _reindex_state["lastJobId"] = job_id
+            _reindex_state["lastStartedAt"] = started_iso
+            _reindex_state["lastFinishedAt"] = finished_iso
+            _reindex_state["lastDurationMs"] = duration_ms
+            _reindex_state["lastResult"] = run_result
+            if run_error:
+                _reindex_state["lastError"] = run_error
+            else:
+                _reindex_state["lastError"] = None
+                _reindex_state["lastSuccessAt"] = finished_iso
+
+            if _reindex_state["queued"]:
+                _reindex_state["queued"] = False
+                job_id = str(uuid4())
+                _reindex_state["currentJobId"] = job_id
+                continue
+
+            _reindex_state["running"] = False
+            _reindex_state["currentJobId"] = None
+            break
 
 
 class EmbedRequest(BaseModel):
@@ -59,6 +130,7 @@ def health() -> dict[str, Any]:
         "app_env": settings.app_env,
         "embedding_backend": settings.resolved_embedding_backend,
         "collection": settings.qdrant_collection,
+        "reindex": _snapshot_reindex_state(),
     }
 
 
@@ -74,7 +146,12 @@ def embed_body(body: EmbedRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Cần `text` hoặc `inputs`")
 
     backend = settings.resolved_embedding_backend
-    vectors = embedding_provider.embed_texts(settings, texts)
+    try:
+        vectors = embedding_provider.embed_texts(settings, texts)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Embedding request failed: {exc}") from exc
     dim = len(vectors[0]) if vectors else 0
     return {
         "model": settings.embedding_local_model
@@ -90,30 +167,40 @@ def embed_body(body: EmbedRequest) -> dict[str, Any]:
 def reindex(
     body: ReindexRequest,
     request: Request,
-    background_tasks: BackgroundTasks,
     x_reindex_key: str | None = Header(default=None, alias="X-Reindex-Key"),
 ) -> dict[str, Any]:
     _check_reindex_secret(request, x_reindex_key)
     settings = get_settings()
+    job_id = str(uuid4())
 
-    def run_indexing():
-        try:
-            # Thực hiện index thực tế ở background
-            index_products(
-                settings,
-                product_id=body.product_id,
-                full_reset=body.full_reset,
-            )
-        except Exception as e:
-            # Log lỗi nếu cần (vì chạy background nên không raise HTTPException được)
-            print(f"Background indexing error: {e}")
+    with _reindex_lock:
+        _reindex_state["lastRequestAt"] = _utc_now_iso()
+        if _reindex_state["running"]:
+            _reindex_state["queued"] = True
+            return {
+                "code": 202,
+                "message": "Reindex job is already running; request queued.",
+                "data": {
+                    "jobId": _reindex_state["currentJobId"],
+                    "queued": True,
+                    "product_id": body.product_id,
+                    "full_reset": body.full_reset,
+                },
+            }
 
-    background_tasks.add_task(run_indexing)
+        _reindex_state["running"] = True
+        _reindex_state["queued"] = False
+        _reindex_state["currentJobId"] = job_id
+        _reindex_state["lastError"] = None
+
+    worker = Thread(target=_run_reindex_worker, args=(settings, body, job_id), daemon=True)
+    worker.start()
 
     return {
         "code": 202,
-        "message": "Reindexing started in background. Please check logs for completion.",
+        "message": "Reindexing started in background.",
         "data": {
+            "jobId": job_id,
             "product_id": body.product_id,
             "full_reset": body.full_reset,
         },
@@ -124,16 +211,26 @@ def reindex(
 def search_ctx(body: SearchRequest) -> dict[str, Any]:
     """Embed query + Qdrant search (tiện cho n8n một node ít cấu hình)."""
     settings = get_settings()
-    vec = embedding_provider.embed_texts(settings, [body.text])[0]
-    client = get_client(settings)
-    hits = search(
-        client,
-        settings.qdrant_collection,
-        vector=vec,
-        limit=min(max(body.limit, 1), 50),
-        score_threshold=body.score_threshold,
-        product_id_filter=body.product_id,
-    )
+    try:
+        vec = embedding_provider.embed_texts(settings, [body.text])[0]
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Embedding request failed: {exc}") from exc
+
+    try:
+        client = get_client(settings)
+        hits = search(
+            client,
+            settings.qdrant_collection,
+            vector=vec,
+            limit=min(max(body.limit, 1), 50),
+            score_threshold=body.score_threshold,
+            product_id_filter=body.product_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Qdrant search failed: {exc}") from exc
+
     return {"code": 200, "data": {"hits": hits}}
 
 

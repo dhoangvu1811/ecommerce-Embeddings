@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     embedding_batch_delay_seconds: float = Field(
         default=6.5, validation_alias="EMBEDDING_BATCH_DELAY_SECONDS"
     )
+    embedding_request_timeout_seconds: float = Field(
+        default=30.0, validation_alias="EMBEDDING_REQUEST_TIMEOUT_SECONDS"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -85,9 +85,10 @@ def index_products(
         current_texts.clear()
         current_meta.clear()
 
-        # Rate limiting for ProtonX
+        # Rate limiting for ProtonX.
+        # Cap the sleep so background indexing does not stall the whole service too long.
         if settings.resolved_embedding_backend == "protonx":
-            delay_s = max(0.0, float(settings.embedding_batch_delay_seconds))
+            delay_s = min(max(0.0, float(settings.embedding_batch_delay_seconds)), 1.0)
             if delay_s > 0:
                 time.sleep(delay_s)
 
