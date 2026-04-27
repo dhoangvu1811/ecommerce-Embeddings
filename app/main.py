@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 from datetime import datetime, timezone
-from threading import Lock, Thread
+from queue import Empty, Queue
+from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -22,6 +23,8 @@ app = FastAPI(
 )
 
 _reindex_lock = Lock()
+_reindex_queue: Queue[tuple[str, "ReindexRequest"]] = Queue()
+_reindex_worker_started = Event()
 _reindex_state: dict[str, Any] = {
     "running": False,
     "queued": False,
@@ -46,8 +49,35 @@ def _snapshot_reindex_state() -> dict[str, Any]:
         return dict(_reindex_state)
 
 
-def _run_reindex_worker(settings, body: ReindexRequest, job_id: str) -> None:
+def _record_reindex_finished(job_id: str, started_iso: str, duration_ms: int, run_result: dict[str, Any] | None, run_error: str | None) -> None:
+    finished_iso = _utc_now_iso()
+
+    with _reindex_lock:
+        _reindex_state["lastJobId"] = job_id
+        _reindex_state["lastStartedAt"] = started_iso
+        _reindex_state["lastFinishedAt"] = finished_iso
+        _reindex_state["lastDurationMs"] = duration_ms
+        _reindex_state["lastResult"] = run_result
+        if run_error:
+            _reindex_state["lastError"] = run_error
+        else:
+            _reindex_state["lastError"] = None
+            _reindex_state["lastSuccessAt"] = finished_iso
+
+
+def _reindex_worker_loop() -> None:
     while True:
+        try:
+            job_id, body = _reindex_queue.get(timeout=0.5)
+        except Empty:
+            continue
+
+        with _reindex_lock:
+            _reindex_state["running"] = True
+            _reindex_state["currentJobId"] = job_id
+            _reindex_state["queued"] = not _reindex_queue.empty()
+
+        settings = get_settings()
         started_at = time.monotonic()
         started_iso = _utc_now_iso()
         run_result: dict[str, Any] | None = None
@@ -64,29 +94,28 @@ def _run_reindex_worker(settings, body: ReindexRequest, job_id: str) -> None:
             print(f"[reindex] job={job_id} failed: {exc}")
 
         duration_ms = int((time.monotonic() - started_at) * 1000)
-        finished_iso = _utc_now_iso()
+        _record_reindex_finished(job_id, started_iso, duration_ms, run_result, run_error)
 
         with _reindex_lock:
-            _reindex_state["lastJobId"] = job_id
-            _reindex_state["lastStartedAt"] = started_iso
-            _reindex_state["lastFinishedAt"] = finished_iso
-            _reindex_state["lastDurationMs"] = duration_ms
-            _reindex_state["lastResult"] = run_result
-            if run_error:
-                _reindex_state["lastError"] = run_error
-            else:
-                _reindex_state["lastError"] = None
-                _reindex_state["lastSuccessAt"] = finished_iso
-
-            if _reindex_state["queued"]:
+            if _reindex_queue.empty():
+                _reindex_state["running"] = False
+                _reindex_state["currentJobId"] = None
                 _reindex_state["queued"] = False
-                job_id = str(uuid4())
-                _reindex_state["currentJobId"] = job_id
-                continue
+            else:
+                _reindex_state["running"] = True
+                _reindex_state["queued"] = True
 
-            _reindex_state["running"] = False
-            _reindex_state["currentJobId"] = None
-            break
+        _reindex_queue.task_done()
+
+
+@app.on_event("startup")
+def _start_reindex_worker() -> None:
+    if _reindex_worker_started.is_set():
+        return
+
+    worker = Thread(target=_reindex_worker_loop, daemon=True)
+    worker.start()
+    _reindex_worker_started.set()
 
 
 class EmbedRequest(BaseModel):
@@ -176,12 +205,15 @@ def reindex(
     with _reindex_lock:
         _reindex_state["lastRequestAt"] = _utc_now_iso()
         if _reindex_state["running"]:
+            queued_job_id = str(uuid4())
             _reindex_state["queued"] = True
+            _reindex_queue.put((queued_job_id, body))
             return {
                 "code": 202,
                 "message": "Reindex job is already running; request queued.",
                 "data": {
                     "jobId": _reindex_state["currentJobId"],
+                    "queuedJobId": queued_job_id,
                     "queued": True,
                     "product_id": body.product_id,
                     "full_reset": body.full_reset,
@@ -193,8 +225,7 @@ def reindex(
         _reindex_state["currentJobId"] = job_id
         _reindex_state["lastError"] = None
 
-    worker = Thread(target=_run_reindex_worker, args=(settings, body, job_id), daemon=True)
-    worker.start()
+    _reindex_queue.put((job_id, body))
 
     return {
         "code": 202,
