@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
+
+# Ensure model cache goes to writable /tmp on HuggingFace Spaces
+os.environ.setdefault("HF_HOME", "/tmp/hf_cache")
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", "/tmp/hf_cache")
 
 from app.config import Settings
 

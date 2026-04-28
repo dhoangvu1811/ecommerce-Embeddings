@@ -1,0 +1,23 @@
+name: Deploy to HuggingFace Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ secrets.HF_SPACE || 'dhoangvu1811/ecommerce-embeddings' }}
+        run: |
+          git push https://DHVux:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE} main --force

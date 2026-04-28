@@ -1,0 +1,24 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Environment files (secrets configured via HF Settings)
+.env
+.env.*
+
+# Git & IDE
+.git/
+.github/
+.vscode/
+.idea/
+
+# Docs (optional, saves build size)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

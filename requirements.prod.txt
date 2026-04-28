@@ -1,0 +1,15 @@
+# =============================================================================
+# Production dependencies (ProtonX backend — no local models needed)
+# Significantly lighter than full requirements.txt (~50 MB vs ~2 GB)
+# =============================================================================
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+python-dotenv==1.0.1
+pydantic==2.7.4
+pydantic-settings==2.3.4
+psycopg[binary]==3.2.6
+qdrant-client==1.12.1
+numpy==2.1.1
+httpx==0.28.1
+# ProtonX cloud API (production embedding backend)
+protonx==0.1.8
