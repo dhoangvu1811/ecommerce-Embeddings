@@ -7,13 +7,13 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app import embedding_provider
 from app.config import get_settings
-from app.index_service import index_products
+from app.index_service import index_product_images, index_products
 from app.qdrant_store import get_client, search
 
 app = FastAPI(
@@ -84,11 +84,25 @@ def _reindex_worker_loop() -> None:
         run_error: str | None = None
 
         try:
-            run_result = index_products(
+            text_result = index_products(
                 settings,
                 product_id=body.product_id,
                 full_reset=body.full_reset,
             )
+            # Also index product images with CLIP when enabled
+            image_result = None
+            if settings.clip_enabled:
+                try:
+                    image_result = index_product_images(
+                        settings,
+                        product_id=body.product_id,
+                        full_reset=body.full_reset,
+                    )
+                except Exception as img_exc:
+                    print(f"[reindex] image indexing failed (non-fatal): {img_exc}")
+                    image_result = {"error": str(img_exc)}
+
+            run_result = {"text": text_result, "image": image_result}
         except Exception as exc:
             run_error = str(exc)
             print(f"[reindex] job={job_id} failed: {exc}")
@@ -159,6 +173,8 @@ def health() -> dict[str, Any]:
         "app_env": settings.app_env,
         "embedding_backend": settings.resolved_embedding_backend,
         "collection": settings.qdrant_collection,
+        "image_collection": settings.qdrant_image_collection,
+        "clip_enabled": settings.clip_enabled,
         "reindex": _snapshot_reindex_state(),
     }
 
@@ -261,6 +277,51 @@ def search_ctx(body: SearchRequest) -> dict[str, Any]:
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Qdrant search failed: {exc}") from exc
+
+    return {"code": 200, "data": {"hits": hits}}
+
+
+@app.post("/v1/search-by-image")
+async def search_by_image(
+    file: UploadFile | None = File(default=None),
+    image_url: str | None = Form(default=None),
+    limit: int = Form(default=8),
+    score_threshold: float = Form(default=0.3),
+) -> dict[str, Any]:
+    """Upload an image OR provide a URL → CLIP embed → Qdrant image search."""
+    settings = get_settings()
+    if not settings.clip_enabled:
+        raise HTTPException(status_code=503, detail="CLIP image search is disabled")
+
+    from app.clip_provider import embed_image_from_bytes, embed_image_from_url
+
+    try:
+        if file is not None:
+            data = await file.read()
+            if not data:
+                raise HTTPException(status_code=400, detail="File ảnh rỗng")
+            vec = embed_image_from_bytes(data)
+        elif image_url:
+            vec = embed_image_from_url(image_url.strip())
+        else:
+            raise HTTPException(status_code=400, detail="Cần gửi file ảnh hoặc image_url")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"CLIP embedding failed: {exc}") from exc
+
+    try:
+        client = get_client(settings)
+        hits = search(
+            client,
+            settings.qdrant_image_collection,
+            vector=vec,
+            limit=min(max(limit, 1), 50),
+            score_threshold=score_threshold,
+            product_id_filter=None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Qdrant image search failed: {exc}") from exc
 
     return {"code": 200, "data": {"hits": hits}}
 

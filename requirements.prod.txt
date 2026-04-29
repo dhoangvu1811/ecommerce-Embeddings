@@ -1,6 +1,6 @@
 # =============================================================================
-# Production dependencies (ProtonX backend — no local models needed)
-# Significantly lighter than full requirements.txt (~50 MB vs ~2 GB)
+# Production dependencies for HuggingFace Spaces deployment
+# Includes CLIP for image search (uses torch CPU-only to save space)
 # =============================================================================
 fastapi==0.115.12
 uvicorn[standard]==0.34.0
@@ -11,5 +11,12 @@ psycopg[binary]==3.2.6
 qdrant-client==1.12.1
 numpy==2.1.1
 httpx==0.28.1
-# ProtonX cloud API (production embedding backend)
+# ProtonX cloud API (production text embedding backend)
 protonx==0.1.8
+# CLIP multimodal embeddings for image search
+open-clip-torch>=2.26.1
+Pillow>=10.0.0
+python-multipart>=0.0.12
+# Torch CPU-only (much smaller than full torch with CUDA ~530MB → ~200MB)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch

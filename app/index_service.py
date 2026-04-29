@@ -134,3 +134,84 @@ def index_products(
         "indexedProducts": total_products,
         "collection": settings.qdrant_collection,
     }
+
+
+def index_product_images(
+    settings: Settings,
+    *,
+    product_id: int | None = None,
+    full_reset: bool = False,
+) -> dict[str, Any]:
+    """Index product images with CLIP embeddings into a separate Qdrant collection."""
+    from app.clip_provider import CLIP_VECTOR_SIZE, embed_image_from_url
+    from app.qdrant_store import delete_collection_if_exists
+
+    client = get_client(settings)
+    collection = settings.qdrant_image_collection
+    ensure_collection(client, collection, CLIP_VECTOR_SIZE)
+
+    if full_reset:
+        delete_collection_if_exists(client, collection)
+        ensure_collection(client, collection, CLIP_VECTOR_SIZE)
+
+    # Determine which products to index
+    if product_id is not None:
+        row = fetch_product_by_id(settings.database_url, product_id)
+        products = [row] if row else []
+        # Delete old image point for this product
+        if row and client.collection_exists(collection):
+            client.delete(
+                collection_name=collection,
+                points_selector=FilterSelector(
+                    filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="product_id",
+                                match=MatchValue(value=product_id),
+                            )
+                        ]
+                    )
+                ),
+            )
+    else:
+        products = list(fetch_active_products(settings.database_url))
+
+    total_indexed = 0
+    total_skipped = 0
+
+    for row in products:
+        pid = int(row["id"])
+        image_url = str(row.get("image") or "").strip()
+        if not image_url:
+            total_skipped += 1
+            print(f"[image-index] product {pid} — no image, skipped")
+            continue
+
+        try:
+            vec = embed_image_from_url(image_url)
+            url = _store_url(settings, str(row.get("slug") or ""), pid)
+            point = PointStruct(
+                id=pid,
+                vector=vec,
+                payload={
+                    "product_id": pid,
+                    "name": row.get("name"),
+                    "slug": row.get("slug"),
+                    "category_name": row.get("category_name"),
+                    "price": row.get("price"),
+                    "image": image_url,
+                    "url": url,
+                },
+            )
+            upsert_points(client, collection, [point])
+            total_indexed += 1
+            print(f"[image-index] product {pid} — indexed OK")
+        except Exception as exc:
+            total_skipped += 1
+            print(f"[image-index] product {pid} — FAILED: {exc}")
+
+    return {
+        "indexedImages": total_indexed,
+        "skipped": total_skipped,
+        "collection": collection,
+    }

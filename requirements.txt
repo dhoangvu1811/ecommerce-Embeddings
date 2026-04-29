@@ -12,3 +12,7 @@ sentence-transformers==3.3.1
 torch>=2.2.0
 # Optional: ProtonX cloud API (set EMBEDDING_BACKEND=protonx + PROTONX_API_KEY)
 protonx==0.1.8
+# CLIP multimodal embeddings for image search
+open-clip-torch>=2.26.1
+Pillow>=10.0.0
+python-multipart>=0.0.12

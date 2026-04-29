@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(default="http://localhost:6333", validation_alias="QDRANT_URL")
     qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
     qdrant_collection: str = Field(default="products_v1", validation_alias="QDRANT_COLLECTION")
+    qdrant_image_collection: str = Field(
+        default="products_images_v1", validation_alias="QDRANT_IMAGE_COLLECTION"
+    )
+
+    # CLIP image search — enabled by default; set CLIP_ENABLED=false to disable
+    clip_enabled: bool = Field(default=True, validation_alias="CLIP_ENABLED")
 
     embeddings_reindex_secret: str = Field(default="", validation_alias="EMBEDDINGS_REINDEX_SECRET")
 

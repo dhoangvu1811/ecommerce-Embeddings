@@ -1,6 +1,6 @@
 # =============================================================================
 # ecommerce-Embeddings — HuggingFace Spaces (Docker SDK, CPU Basic Free)
-# Production uses ProtonX API → no torch/sentence-transformers needed
+# Includes: ProtonX text embeddings + CLIP image search (torch CPU-only)
 # =============================================================================
 
 FROM python:3.11-slim
@@ -18,7 +18,7 @@ ENV HF_HOME=/tmp/hf_cache \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# Install production dependencies only (no torch, ~50 MB vs ~2 GB)
+# Install production dependencies (torch CPU-only + CLIP + ProtonX)
 COPY requirements.prod.txt .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.prod.txt
