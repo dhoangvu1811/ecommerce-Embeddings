@@ -16,6 +16,8 @@ def get_client(settings: Settings) -> QdrantClient:
 
 
 def ensure_collection(client: QdrantClient, collection: str, vector_size: int) -> None:
+    from qdrant_client.models import PayloadSchemaType
+
     if client.collection_exists(collection):
         info = client.get_collection(collection)
         existing = info.config.params.vectors
@@ -25,10 +27,26 @@ def ensure_collection(client: QdrantClient, collection: str, vector_size: int) -
                     f"Qdrant collection {collection} has size {existing.size}, expected {vector_size}. "
                     "Change EMBEDDING_VECTOR_SIZE or recreate collection."
                 )
+        # Ensure index exists if collection already exists
+        if not info.payload_schema or "product_id" not in info.payload_schema:
+            try:
+                client.create_payload_index(
+                    collection_name=collection,
+                    field_name="product_id",
+                    field_schema=PayloadSchemaType.INTEGER,
+                )
+            except Exception as e:
+                print(f"[Qdrant] Warning: Could not create payload index on existing collection: {e}")
         return
+
     client.create_collection(
         collection_name=collection,
         vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+    )
+    client.create_payload_index(
+        collection_name=collection,
+        field_name="product_id",
+        field_schema=PayloadSchemaType.INTEGER,
     )
 
 

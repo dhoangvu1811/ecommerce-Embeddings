@@ -68,7 +68,23 @@ def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
     timeout_seconds = max(1.0, float(settings.embedding_request_timeout_seconds))
 
     def _call_protonx() -> list[list[float]]:
-        resp = client.embeddings.create(input=texts)
+        # Thêm cơ chế retry 1 lần để fix lỗi "RemoteDisconnected" do connection pool bị timeout
+        try:
+            resp = client.embeddings.create(input=texts)
+        except Exception as exc:
+            if "RemoteDisconnected" in str(exc) or "Connection aborted" in str(exc):
+                print(f"[ProtonX] Connection dropped ({exc}), retrying...")
+                # Nếu client cache bị đứt kết nối, thử tạo lại client mới rồi gọi lại
+                global _protonx_client
+                from protonx import ProtonX
+                _protonx_client = ProtonX(
+                    base_url=settings.protonx_embeddings_url,
+                    api_key=settings.protonx_api_key,
+                    mode="online",
+                )
+                resp = _protonx_client.embeddings.create(input=texts)
+            else:
+                raise
         return _parse_protonx_response(resp, len(texts))
 
     future = _EMBEDDING_EXECUTOR.submit(_call_protonx)
