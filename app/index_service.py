@@ -73,8 +73,26 @@ def index_products(
         nonlocal total_indexed_chunks
         if not current_texts:
             return
-        
-        embeddings = embedding_provider.embed_texts(settings, current_texts)
+
+        # Retry với back-off khi ProtonX timeout
+        max_retries = 2
+        embeddings = None
+        for attempt in range(max_retries + 1):
+            try:
+                embeddings = embedding_provider.embed_texts(settings, current_texts)
+                break
+            except TimeoutError:
+                if attempt < max_retries:
+                    wait = (attempt + 1) * 5  # 5s, 10s
+                    logger.warning(
+                        "Embedding timeout, retrying after %ds (attempt %d/%d).",
+                        wait, attempt + 1, max_retries,
+                        extra={"batch_size": len(current_texts)},
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+
         points: list[PointStruct] = []
         for emb, m in zip(embeddings, current_meta, strict=True):
             points.append(
@@ -117,6 +135,11 @@ def index_products(
                 "slug": row.get("slug"),
                 "category_name": row.get("category_name"),
                 "price": row.get("price"),
+                "discount": row.get("discount"),
+                "rating": row.get("rating"),
+                "selled": row.get("selled"),
+                "stock": row.get("stock"),
+                "review_count": row.get("review_count"),
                 "image": row.get("image"),
                 "url": url,
                 "text": ch,
@@ -202,6 +225,9 @@ def index_product_images(
                     "slug": row.get("slug"),
                     "category_name": row.get("category_name"),
                     "price": row.get("price"),
+                    "discount": row.get("discount"),
+                    "rating": row.get("rating"),
+                    "selled": row.get("selled"),
                     "image": image_url,
                     "url": url,
                 },
