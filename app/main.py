@@ -18,7 +18,7 @@ from app import embedding_provider
 from app.config import get_settings
 from app.index_service import index_product_images, index_products
 from app.logging_config import setup_logging
-from app.qdrant_store import get_client, search
+from app.qdrant_store import get_client, search, search_and_group
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +306,7 @@ def search_ctx(body: SearchRequest) -> dict[str, Any]:
 
     try:
         client = get_client(settings)
-        hits = search(
+        hits = search_and_group(
             client,
             settings.qdrant_collection,
             vector=vec,
@@ -351,7 +351,7 @@ async def search_by_image(
 
     try:
         client = get_client(settings)
-        hits = search(
+        hits = search_and_group(
             client,
             settings.qdrant_image_collection,
             vector=vec,
