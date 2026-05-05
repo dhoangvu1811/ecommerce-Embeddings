@@ -15,6 +15,7 @@ def setup_logging():
     
     logging.basicConfig(level=logging.INFO, handlers=[log_handler])
     
-    # Silence overly verbose loggers
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # Silence overly verbose loggers.
+    # Keep access logs at INFO level to see requests.
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
