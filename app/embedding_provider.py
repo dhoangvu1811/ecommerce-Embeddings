@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Ensure model cache goes to writable /tmp on HuggingFace Spaces
 os.environ.setdefault("HF_HOME", "/tmp/hf_cache")
@@ -73,7 +77,10 @@ def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
             resp = client.embeddings.create(input=texts)
         except Exception as exc:
             if "RemoteDisconnected" in str(exc) or "Connection aborted" in str(exc):
-                print(f"[ProtonX] Connection dropped ({exc}), retrying...")
+                logger.warning(
+                    "ProtonX connection dropped, retrying once.",
+                    extra={"error": str(exc)},
+                )
                 # Nếu client cache bị đứt kết nối, thử tạo lại client mới rồi gọi lại
                 global _protonx_client
                 from protonx import ProtonX

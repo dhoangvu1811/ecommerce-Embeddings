@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -10,6 +11,8 @@ from app.chunking import build_product_document, chunk_text
 from app.config import Settings
 from app.db import fetch_active_products, fetch_product_by_id
 from app.qdrant_store import ensure_collection, get_client, upsert_points
+
+logger = logging.getLogger(__name__)
 
 
 def _store_url(settings: Settings, slug: str, product_id: int) -> str:
@@ -184,7 +187,7 @@ def index_product_images(
         image_url = str(row.get("image") or "").strip()
         if not image_url:
             total_skipped += 1
-            print(f"[image-index] product {pid} — no image, skipped")
+            logger.info("Product has no image, skipping.", extra={"product_id": pid})
             continue
 
         try:
@@ -205,10 +208,16 @@ def index_product_images(
             )
             upsert_points(client, collection, [point])
             total_indexed += 1
-            print(f"[image-index] product {pid} — indexed OK")
-        except Exception as exc:
+            logger.info(
+                "Product image indexed successfully.", extra={"product_id": pid}
+            )
+        except Exception:
             total_skipped += 1
-            print(f"[image-index] product {pid} — FAILED: {exc}")
+            logger.error(
+                "Failed to index product image.",
+                extra={"product_id": pid, "image_url": image_url},
+                exc_info=True,
+            )
 
     return {
         "indexedImages": total_indexed,

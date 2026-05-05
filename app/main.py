@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 from datetime import datetime, timezone
@@ -10,17 +11,38 @@ from uuid import uuid4
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from prometheus_client import Counter, Histogram
+from starlette_prometheus import PrometheusMiddleware, metrics
 
 from app import embedding_provider
 from app.config import get_settings
 from app.index_service import index_product_images, index_products
+from app.logging_config import setup_logging
 from app.qdrant_store import get_client, search
+
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="ecommerce-Embeddings",
     version="1.0.0",
     description="Embeddings, Qdrant index, and /v1/embed for RAG",
 )
+
+# Add Prometheus middleware and /metrics endpoint
+app.add_middleware(PrometheusMiddleware)
+app.add_route("/metrics", metrics)
+
+# Define custom metrics
+REINDEX_JOBS_PROCESSED = Counter(
+    "reindex_jobs_processed_total",
+    "Total number of re-index jobs processed",
+    ["status"],  # success or failure
+)
+REINDEX_JOB_DURATION = Histogram(
+    "reindex_job_duration_seconds", "Duration of re-index jobs"
+)
+
 
 _reindex_lock = Lock()
 _reindex_queue: Queue[tuple[str, "ReindexRequest"]] = Queue()
@@ -82,6 +104,7 @@ def _reindex_worker_loop() -> None:
         started_iso = _utc_now_iso()
         run_result: dict[str, Any] | None = None
         run_error: str | None = None
+        job_status = "success"
 
         try:
             text_result = index_products(
@@ -98,16 +121,31 @@ def _reindex_worker_loop() -> None:
                         product_id=body.product_id,
                         full_reset=body.full_reset,
                     )
-                except Exception as img_exc:
-                    print(f"[reindex] image indexing failed (non-fatal): {img_exc}")
-                    image_result = {"error": str(img_exc)}
+                except Exception:
+                    logger.warning(
+                        "Image indexing failed (non-fatal).",
+                        extra={"product_id": body.product_id},
+                        exc_info=True,
+                    )
+                    image_result = {"error": "Image indexing failed."}
 
             run_result = {"text": text_result, "image": image_result}
-        except Exception as exc:
-            run_error = str(exc)
-            print(f"[reindex] job={job_id} failed: {exc}")
-
+        except Exception:
+            job_status = "failure"
+            run_error = "Reindex job failed"
+            logger.error(
+                "Reindex job failed",
+                extra={"job_id": job_id, "product_id": body.product_id},
+                exc_info=True,
+            )
+        
         duration_ms = int((time.monotonic() - started_at) * 1000)
+        duration_s = duration_ms / 1000.0
+        
+        # Record metrics
+        REINDEX_JOBS_PROCESSED.labels(status=job_status).inc()
+        REINDEX_JOB_DURATION.observe(duration_s)
+        
         _record_reindex_finished(job_id, started_iso, duration_ms, run_result, run_error)
 
         with _reindex_lock:
@@ -124,6 +162,7 @@ def _reindex_worker_loop() -> None:
 
 @app.on_event("startup")
 def _start_reindex_worker() -> None:
+    setup_logging()
     if _reindex_worker_started.is_set():
         return
 
