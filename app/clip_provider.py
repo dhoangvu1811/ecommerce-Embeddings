@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from typing import Any
 
 import httpx
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Ensure model cache goes to writable /tmp on HuggingFace Spaces
 os.environ.setdefault("HF_HOME", "/tmp/hf_cache")
@@ -34,7 +38,14 @@ def _load_clip():
         _clip_model = model
         _clip_preprocess = preprocess
         _clip_tokenizer = open_clip.get_tokenizer(CLIP_MODEL_NAME)
-        print(f"[clip] Loaded {CLIP_MODEL_NAME} on {device}, vector_size={CLIP_VECTOR_SIZE}")
+        logger.info(
+            "CLIP model loaded.",
+            extra={
+                "model_name": CLIP_MODEL_NAME,
+                "device": device,
+                "vector_size": CLIP_VECTOR_SIZE,
+            },
+        )
     return _clip_model, _clip_preprocess, _clip_tokenizer
 
 

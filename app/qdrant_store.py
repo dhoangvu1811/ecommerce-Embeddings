@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_client(settings: Settings) -> QdrantClient:
@@ -36,7 +39,10 @@ def ensure_collection(client: QdrantClient, collection: str, vector_size: int) -
                     field_schema=PayloadSchemaType.INTEGER,
                 )
             except Exception as e:
-                print(f"[Qdrant] Warning: Could not create payload index on existing collection: {e}")
+                logger.warning(
+                    "Could not create payload index on existing Qdrant collection.",
+                    extra={"collection": collection, "error": str(e)},
+                )
         return
 
     client.create_collection(
