@@ -4,14 +4,15 @@
 
 1. Tạo cluster trên [Qdrant Cloud](https://cloud.qdrant.io/), lấy **URL** và **API key**.
 2. Cập nhật `QDRANT_URL`, `QDRANT_API_KEY` trên host chạy **ecommerce-Embeddings** (không commit vào git).
-3. Đảm bảo **cùng** `QDRANT_COLLECTION` và **cùng model embedding** (`EMBEDDING_BACKEND` + model / ProtonX) với môi trường đã index — nếu đổi model, **reindex toàn bộ** (`full_reset: true` một lần).
+3. Đảm bảo **cùng** `QDRANT_COLLECTION` và **cùng model embedding** (`EMBEDDING_LOCAL_MODEL`) với môi trường đã index — nếu đổi model, **reindex toàn bộ** (`full_reset: true` một lần).
 
 ## Secrets
 
 - `APP_ENV=production` — ép service chạy theo profile production.
-- `EMBEDDING_BACKEND=protonx` (hoặc để trống để service tự resolve theo `APP_ENV`).
+- `EMBEDDING_BACKEND=local`.
+- `EMBEDDING_DEVICE=cpu` — khuyến nghị trên HF Spaces.
 - `EMBEDDINGS_REINDEX_SECRET` — khớp Commerce-Api `EMBEDDINGS_REINDEX_SECRET` và header `X-Reindex-Key`.
-- `PROTONX_API_KEY` — nếu dùng backend `protonx`.
+- `EMBEDDING_LOCAL_MODEL` — tên model embedding (phải khớp với collection đã index).
 - `N8N_AI_CHAT_WEBHOOK_URL` — URL production của n8n (HTTPS).
 - `AI_CHAT_INTERNAL_SECRET` — chung giữa Commerce-Api và n8n (header `X-Internal-Key`).
 

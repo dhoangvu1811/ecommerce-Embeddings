@@ -11,15 +11,16 @@ psycopg[binary]==3.2.6
 qdrant-client==1.12.1
 numpy==2.1.1
 httpx==0.28.1
-# ProtonX cloud API (production text embedding backend)
-protonx==0.1.8
+# Local embeddings (Sentence Transformers)
+underthesea>=6.8.4
+sentence-transformers==3.3.1
 # CLIP multimodal embeddings for image search
 open-clip-torch>=2.26.1
 Pillow>=10.0.0
 python-multipart>=0.0.12
-# Torch CPU-only (much smaller than full torch with CUDA ~530MB → ~200MB)
+# Torch CPU-only (much smaller than full torch with CUDA)
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch
+torch==2.3.0+cpu
 python-json-logger>=2.0.7
 # Metrics
 starlette-prometheus>=0.9.0

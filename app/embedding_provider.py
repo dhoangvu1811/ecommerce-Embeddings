@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from typing import Any
+import threading
+from typing import Any, Literal
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -14,31 +14,52 @@ os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", "/tmp/hf_cache")
 
 from app.config import Settings
 
-_local_model: Any = None
-_protonx_client: Any = None
-_EMBEDDING_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embedding-provider")
+_local_model: Any | None = None
+_local_device: str | None = None
+_model_lock = threading.Lock()
+
+_MODE_PREFIXES: dict[Literal["search_document", "search_query"], str] = {
+    "search_document": "",
+    "search_query": "",
+}
+
+
+def _resolve_device(settings: Settings) -> str:
+    requested = (settings.embedding_device or "auto").lower()
+    if requested == "auto":
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if requested == "cuda":
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        logger.warning("CUDA requested but not available. Falling back to CPU.")
+        return "cpu"
+    return "cpu"
 
 
 def _get_local_model(settings: Settings):
-    global _local_model
+    global _local_model, _local_device
     if _local_model is None:
-        from sentence_transformers import SentenceTransformer
+        with _model_lock:
+            if _local_model is None:
+                from sentence_transformers import SentenceTransformer
 
-        _local_model = SentenceTransformer(settings.embedding_local_model)
+                device = _resolve_device(settings)
+                _local_device = device
+                _local_model = SentenceTransformer(
+                    settings.embedding_local_model,
+                    device=device,
+                )
     return _local_model
 
 
-def _get_protonx(settings: Settings):
-    global _protonx_client
-    if _protonx_client is None:
-        from protonx import ProtonX
+def _segment_text(text: str) -> str:
+    from underthesea import word_tokenize
 
-        _protonx_client = ProtonX(
-            base_url=settings.protonx_embeddings_url,
-            api_key=settings.protonx_api_key,
-            mode="online",
-        )
-    return _protonx_client
+    return word_tokenize(text, format="text")
 
 
 def detect_vector_size(settings: Settings) -> int:
@@ -48,69 +69,30 @@ def detect_vector_size(settings: Settings) -> int:
     return len(vecs[0])
 
 
-def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]:
+def embed_texts(
+    settings: Settings,
+    texts: list[str],
+    *,
+    mode: Literal["search_document", "search_query"] = "search_document",
+) -> list[list[float]]:
     if not texts:
         return []
-    backend = settings.resolved_embedding_backend
-    if backend == "local":
-        model = _get_local_model(settings)
-        out = model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
-        return [row.astype(float).tolist() for row in out]
+    model = _get_local_model(settings)
+    prefix = _MODE_PREFIXES.get(mode, "")
+    prepared: list[str] = []
+    for text in texts:
+        raw = "" if text is None else str(text)
+        raw = raw.strip()
+        if prefix:
+            raw = f"{prefix}{raw}"
+        prepared.append(_segment_text(raw) if raw else "")
 
-    # protonx cloud API
-    if not (settings.protonx_api_key or "").strip():
-        raise ValueError(
-            "Resolved backend protonx requires PROTONX_API_KEY in environment."
-        )
-    client = _get_protonx(settings)
-
-    timeout_seconds = max(1.0, float(settings.embedding_request_timeout_seconds))
-
-    def _call_protonx() -> list[list[float]]:
-        # Thêm cơ chế retry 1 lần để fix lỗi "RemoteDisconnected" do connection pool bị timeout
-        try:
-            resp = client.embeddings.create(input=texts)
-        except Exception as exc:
-            if "RemoteDisconnected" in str(exc) or "Connection aborted" in str(exc):
-                logger.warning(
-                    "ProtonX connection dropped, retrying once.",
-                    extra={"error": str(exc)},
-                )
-                # Nếu client cache bị đứt kết nối, thử tạo lại client mới rồi gọi lại
-                global _protonx_client
-                from protonx import ProtonX
-                _protonx_client = ProtonX(
-                    base_url=settings.protonx_embeddings_url,
-                    api_key=settings.protonx_api_key,
-                    mode="online",
-                )
-                resp = _protonx_client.embeddings.create(input=texts)
-            else:
-                raise
-        return _parse_protonx_response(resp, len(texts))
-
-    future = _EMBEDDING_EXECUTOR.submit(_call_protonx)
-    try:
-        return future.result(timeout=timeout_seconds)
-    except FuturesTimeoutError as exc:
-        raise TimeoutError(
-            f"ProtonX embedding request timed out after {timeout_seconds:.0f}s"
-        ) from exc
-
-
-def _parse_protonx_response(resp: dict[str, Any], expected: int) -> list[list[float]]:
-    """Accept OpenAI-like {'data':[{'embedding':[...]}]} or list under 'embeddings'."""
-    if "data" in resp:
-        items = sorted(resp["data"], key=lambda x: x.get("index", 0))
-        return [list(map(float, it["embedding"])) for it in items]
-    if "embeddings" in resp:
-        emb = resp["embeddings"]
-        if isinstance(emb[0], (int, float)):
-            return [list(map(float, emb))]
-        return [list(map(float, e)) for e in emb]
-    raise ValueError(f"Unexpected ProtonX embeddings response keys: {resp.keys()}")
+    batch_size = max(1, int(settings.embedding_batch_size))
+    out = model.encode(
+        prepared,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        batch_size=batch_size,
+    )
+    return [row.astype(float).tolist() for row in out]

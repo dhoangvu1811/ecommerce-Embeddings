@@ -12,17 +12,14 @@ pinned: false
 
 Microservice **Python (FastAPI)** cho **embedding sản phẩm**, **index Qdrant** và API **`POST /v1/embed`** dùng chung cho RAG (client: n8n workflow). Hỗ trợ:
 
-- **Backend embedding `local`**: [sentence-transformers](https://www.sentence-transformers.org/) (mặc định khi `APP_ENV=local/dev`, chạy offline, phù hợp dev local không API key).
-- **Backend `protonx`**: [ProtonX Embeddings API](https://protonx.co/embeddings_models.html) qua package `protonx` + `PROTONX_API_KEY` (mặc định khi `APP_ENV=production`).
+- **Backend embedding `local`**: [sentence-transformers](https://www.sentence-transformers.org/) (chạy offline, phù hợp local và production không API key).
 
 Commerce-Api gọi dịch vụ này khi cần reindex vector (debounce); luồng chat đi qua **n8n** → embed → Qdrant → Ollama.
 
 ## Cấu hình backend theo môi trường
 
-- Local/dev: đặt `APP_ENV=local` (hoặc `dev`), backend mặc định là Sentence Transformers.
-- Production: đặt `APP_ENV=production`, backend mặc định là ProtonX.
-- `EMBEDDING_BACKEND` là biến override tùy chọn; khuyến nghị vẫn để đúng theo môi trường (`local` cho local/dev, `protonx` cho production).
-- Nếu backend hiệu lực là `protonx` thì `PROTONX_API_KEY` là bắt buộc.
+- Local/dev/production: dùng Sentence Transformers (`EMBEDDING_BACKEND=local`).
+- `EMBEDDING_DEVICE=auto` sẽ tự chọn CUDA nếu có, fallback CPU.
 - Có thể kiểm tra backend hiệu lực bằng `GET /health` (trả về `app_env` và `embedding_backend`).
 
 ## Vị trí trong hệ sinh thái
@@ -105,9 +102,9 @@ flowchart LR
 
 | Biến | Mô tả |
 |------|--------|
-| `APP_ENV` | `local` \| `dev` \| `production` (quy định backend mặc định) |
-| `EMBEDDING_BACKEND` | Override tùy chọn: `local` \| `protonx` |
-| `PROTONX_API_KEY` | Bắt buộc nếu `protonx` |
+| `APP_ENV` | `local` \| `dev` \| `production` |
+| `EMBEDDING_BACKEND` | Chỉ dùng `local` (Sentence Transformers) |
+| `EMBEDDING_DEVICE` | `auto` \| `cpu` \| `cuda` |
 | `QDRANT_URL` | VD `http://localhost:6333` |
 | `QDRANT_COLLECTION` | VD `products_v1` |
 | `DATABASE_URL` | PostgreSQL (cùng schema Commerce-Api) |

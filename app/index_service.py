@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue, PointStruct
@@ -34,13 +33,14 @@ def index_products(
 ) -> dict[str, Any]:
     client = get_client(settings)
     vec_size = embedding_provider.detect_vector_size(settings)
-    ensure_collection(client, settings.qdrant_collection, vec_size)
 
     if full_reset:
         from app.qdrant_store import delete_collection_if_exists
 
         delete_collection_if_exists(client, settings.qdrant_collection)
-        ensure_collection(client, settings.qdrant_collection, vec_size)
+
+    ensure_collection(client, settings.qdrant_collection, vec_size)
+
 
     if product_id is not None:
         row = fetch_product_by_id(settings.database_url, product_id)
@@ -73,25 +73,11 @@ def index_products(
         nonlocal total_indexed_chunks
         if not current_texts:
             return
-
-        # Retry với back-off khi ProtonX timeout
-        max_retries = 2
-        embeddings = None
-        for attempt in range(max_retries + 1):
-            try:
-                embeddings = embedding_provider.embed_texts(settings, current_texts)
-                break
-            except TimeoutError:
-                if attempt < max_retries:
-                    wait = (attempt + 1) * 5  # 5s, 10s
-                    logger.warning(
-                        "Embedding timeout, retrying after %ds (attempt %d/%d).",
-                        wait, attempt + 1, max_retries,
-                        extra={"batch_size": len(current_texts)},
-                    )
-                    time.sleep(wait)
-                else:
-                    raise
+        embeddings = embedding_provider.embed_texts(
+            settings,
+            current_texts,
+            mode="search_document",
+        )
 
         points: list[PointStruct] = []
         for emb, m in zip(embeddings, current_meta, strict=True):
@@ -106,12 +92,7 @@ def index_products(
         current_texts.clear()
         current_meta.clear()
 
-        # Rate limiting for ProtonX.
-        # Cap the sleep so background indexing does not stall the whole service too long.
-        if settings.resolved_embedding_backend == "protonx":
-            delay_s = min(max(0.0, float(settings.embedding_batch_delay_seconds)), 1.0)
-            if delay_s > 0:
-                time.sleep(delay_s)
+        return
 
     for row in products_iter:
         total_products += 1
@@ -174,11 +155,12 @@ def index_product_images(
 
     client = get_client(settings)
     collection = settings.qdrant_image_collection
-    ensure_collection(client, collection, CLIP_VECTOR_SIZE)
 
     if full_reset:
         delete_collection_if_exists(client, collection)
-        ensure_collection(client, collection, CLIP_VECTOR_SIZE)
+
+    ensure_collection(client, collection, CLIP_VECTOR_SIZE)
+
 
     # Determine which products to index
     if product_id is not None:
