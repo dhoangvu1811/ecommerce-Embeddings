@@ -198,6 +198,7 @@ def index_product_images(
         try:
             vec = embed_image_from_url(image_url)
             url = _store_url(settings, str(row.get("slug") or ""), pid)
+            detail_text = build_product_document(row)
             point = PointStruct(
                 id=pid,
                 vector=vec,
@@ -210,8 +211,12 @@ def index_product_images(
                     "discount": row.get("discount"),
                     "rating": row.get("rating"),
                     "selled": row.get("selled"),
+                    "stock": row.get("stock"),
+                    "review_count": row.get("review_count"),
                     "image": image_url,
                     "url": url,
+                    "text": detail_text,
+                    "updated_at": str(row.get("updated_at") or ""),
                 },
             )
             upsert_points(client, collection, [point])
