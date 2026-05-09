@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from prometheus_client import Counter, Histogram
 from starlette_prometheus import PrometheusMiddleware, metrics
 
@@ -194,6 +194,13 @@ class SearchRequest(BaseModel):
         validation_alias=AliasChoices("productId", "product_id"),
     )
 
+    @field_validator("product_id", mode="before")
+    @classmethod
+    def parse_empty_product_id(cls, v: Any) -> int | None:
+        if v == "" or v == "null":
+            return None
+        return v
+
 
 def _check_reindex_secret(request: Request, x_reindex_key: str | None) -> None:
     settings = get_settings()
@@ -229,18 +236,13 @@ def embed_body(body: EmbedRequest) -> dict[str, Any]:
     if not texts:
         raise HTTPException(status_code=400, detail="Cần `text` hoặc `inputs`")
 
-    backend = settings.resolved_embedding_backend
     try:
         vectors = embedding_provider.embed_texts(settings, texts)
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Embedding request failed: {exc}") from exc
     dim = len(vectors[0]) if vectors else 0
     return {
-        "model": settings.embedding_local_model
-        if backend == "local"
-        else "protonx",
+        "model": settings.embedding_local_model,
         "dimensions": dim,
         "embeddings": vectors,
         "data": [{"embedding": v, "index": i} for i, v in enumerate(vectors)],
@@ -298,9 +300,11 @@ def search_ctx(body: SearchRequest) -> dict[str, Any]:
     """Embed query + Qdrant search (tiện cho n8n một node ít cấu hình)."""
     settings = get_settings()
     try:
-        vec = embedding_provider.embed_texts(settings, [body.text])[0]
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
+        vec = embedding_provider.embed_texts(
+            settings,
+            [body.text],
+            mode="search_query",
+        )[0]
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Embedding request failed: {exc}") from exc
 
