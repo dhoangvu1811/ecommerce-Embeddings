@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
     cleaned = (text or "").strip()
     if not cleaned:
         return []
     if len(cleaned) <= max_chars:
         return [cleaned]
+
+    if overlap >= max_chars:
+        logger.warning(
+            "overlap=%d >= max_chars=%d, clamp xuống %d",
+            overlap, max_chars, max_chars - 1
+        )
+        overlap = max_chars - 1
+
     chunks: list[str] = []
     start = 0
     while start < len(cleaned):
@@ -16,7 +29,7 @@ def chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
             chunks.append(piece)
         if end >= len(cleaned):
             break
-        start = max(0, end - overlap)
+        start = end - overlap
     return chunks if chunks else [cleaned[:max_chars]]
 
 
