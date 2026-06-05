@@ -8,3 +8,6 @@ __pycache__/
 .mypy_cache/
 .github/prompts
 GEMINI.md
+# CodeGraph
+.codegraph/
+
