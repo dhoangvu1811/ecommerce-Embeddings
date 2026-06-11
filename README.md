@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../Commerce-Api/docs/images/logo.svg" alt="NextCommerce Logo" width="220" />
+  <img src="./docs/images/logo.svg" alt="NextCommerce Logo" width="220" />
 </p>
 
 # NextCommerce — Embeddings & Vector Search Service
