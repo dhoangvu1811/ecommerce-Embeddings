@@ -1,3 +1,13 @@
+---
+title: ecommerce-Embeddings
+emoji: 🔍
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 <p align="center">
   <img src="./docs/images/logo.svg" alt="NextCommerce Logo" width="220" />
 </p>
