@@ -211,6 +211,11 @@ def _check_reindex_secret(request: Request, x_reindex_key: str | None) -> None:
         raise HTTPException(status_code=403, detail="Không có quyền reindex")
 
 
+@app.get("/")
+def read_root() -> dict[str, Any]:
+    return {"status": "ok", "message": "ecommerce-Embeddings API is running"}
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     settings = get_settings()
