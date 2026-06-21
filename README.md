@@ -12,7 +12,7 @@ pinned: false
   <img src="./docs/images/logo.svg" alt="NextCommerce Logo" width="220" />
 </p>
 
-# NextCommerce — Embeddings & Vector Search Service
+# NextCommerce — Embeddings & Vector Search Service (test git action)
 
 > FastAPI-based microservice responsible for generating text & visual embeddings, managing Qdrant vector collections, and serving semantic search endpoints for the platform's RAG chatbot (n8n workflow) and image search pipelines.
 
