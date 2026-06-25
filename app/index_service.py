@@ -34,9 +34,18 @@ def index_products(
     client = get_client(settings)
     vec_size = embedding_provider.detect_vector_size(settings)
 
+    logger.info(
+        "Starting text indexing.",
+        extra={"process": "text_indexing", "product_id": product_id, "full_reset": full_reset}
+    )
+
     if full_reset:
         from app.qdrant_store import delete_collection_if_exists
 
+        logger.info(
+            f"Performing full reset of collection {settings.qdrant_collection}.",
+            extra={"process": "text_indexing"}
+        )
         delete_collection_if_exists(client, settings.qdrant_collection)
 
     ensure_collection(client, settings.qdrant_collection, vec_size)
@@ -88,6 +97,11 @@ def index_products(
         upsert_points(client, settings.qdrant_collection, points)
         total_indexed_chunks += len(points)
         
+        logger.info(
+            f"Upserted batch of {len(points)} text chunks.",
+            extra={"process": "text_indexing", "batch_size": len(points)}
+        )
+
         # Clear batch buffers to free memory
         current_texts.clear()
         current_meta.clear()
@@ -136,6 +150,15 @@ def index_products(
     # Xử lý phần dư cuối cùng
     flush_batch()
 
+    logger.info(
+        "Text indexing completed successfully.",
+        extra={
+            "process": "text_indexing",
+            "indexed_chunks": total_indexed_chunks,
+            "indexed_products": total_products,
+        }
+    )
+
     return {
         "indexedChunks": total_indexed_chunks,
         "indexedProducts": total_products,
@@ -156,7 +179,16 @@ def index_product_images(
     client = get_client(settings)
     collection = settings.qdrant_image_collection
 
+    logger.info(
+        "Starting image indexing.",
+        extra={"process": "image_indexing", "product_id": product_id, "full_reset": full_reset}
+    )
+
     if full_reset:
+        logger.info(
+            f"Performing full reset of image collection {collection}.",
+            extra={"process": "image_indexing"}
+        )
         delete_collection_if_exists(client, collection)
 
     ensure_collection(client, collection, CLIP_VECTOR_SIZE)
@@ -192,7 +224,7 @@ def index_product_images(
         image_url = str(row.get("image") or "").strip()
         if not image_url:
             total_skipped += 1
-            logger.info("Product has no image, skipping.", extra={"product_id": pid})
+            logger.info("Product has no image, skipping.", extra={"process": "image_indexing", "product_id": pid})
             continue
 
         try:
@@ -222,15 +254,24 @@ def index_product_images(
             upsert_points(client, collection, [point])
             total_indexed += 1
             logger.info(
-                "Product image indexed successfully.", extra={"product_id": pid}
+                "Product image indexed successfully.", extra={"process": "image_indexing", "product_id": pid}
             )
         except Exception:
             total_skipped += 1
             logger.error(
                 "Failed to index product image.",
-                extra={"product_id": pid, "image_url": image_url},
+                extra={"process": "image_indexing", "product_id": pid, "image_url": image_url},
                 exc_info=True,
             )
+
+    logger.info(
+        "Image indexing completed.",
+        extra={
+            "process": "image_indexing",
+            "indexed_images": total_indexed,
+            "skipped_images": total_skipped,
+        }
+    )
 
     return {
         "indexedImages": total_indexed,

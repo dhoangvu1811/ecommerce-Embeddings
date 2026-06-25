@@ -106,30 +106,53 @@ def _reindex_worker_loop() -> None:
         run_error: str | None = None
         job_status = "success"
 
+        logger.info(
+            "Starting reindex job.",
+            extra={"job_id": job_id, "product_id": body.product_id, "full_reset": body.full_reset}
+        )
+
         try:
+            text_start = time.monotonic()
             text_result = index_products(
                 settings,
                 product_id=body.product_id,
                 full_reset=body.full_reset,
             )
+            text_dur = int((time.monotonic() - text_start) * 1000)
+            logger.info(
+                f"Finished text indexing phase in {text_dur}ms.",
+                extra={"process": "text_indexing", "job_id": job_id, "duration_ms": text_dur}
+            )
             # Also index product images with CLIP when enabled
             image_result = None
             if settings.clip_enabled:
                 try:
+                    image_start = time.monotonic()
                     image_result = index_product_images(
                         settings,
                         product_id=body.product_id,
                         full_reset=body.full_reset,
                     )
+                    image_dur = int((time.monotonic() - image_start) * 1000)
+                    logger.info(
+                        f"Finished image indexing phase in {image_dur}ms.",
+                        extra={"process": "image_indexing", "job_id": job_id, "duration_ms": image_dur}
+                    )
                 except Exception:
                     logger.warning(
                         "Image indexing failed (non-fatal).",
-                        extra={"product_id": body.product_id},
+                        extra={"process": "image_indexing", "product_id": body.product_id, "job_id": job_id},
                         exc_info=True,
                     )
                     image_result = {"error": "Image indexing failed."}
 
             run_result = {"text": text_result, "image": image_result}
+            
+            total_dur = int((time.monotonic() - started_at) * 1000)
+            logger.info(
+                f"Reindex job {job_id} completed successfully in {total_dur}ms.",
+                extra={"job_id": job_id, "duration_ms": total_dur}
+            )
         except Exception:
             job_status = "failure"
             run_error = "Reindex job failed"
