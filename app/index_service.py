@@ -36,7 +36,7 @@ def index_products(
 
     logger.info(
         "Starting text indexing.",
-        extra={"process": "text_indexing", "product_id": product_id, "full_reset": full_reset}
+        extra={"phase": "text_indexing", "product_id": product_id, "full_reset": full_reset}
     )
 
     if full_reset:
@@ -44,7 +44,7 @@ def index_products(
 
         logger.info(
             f"Performing full reset of collection {settings.qdrant_collection}.",
-            extra={"process": "text_indexing"}
+            extra={"phase": "text_indexing"}
         )
         delete_collection_if_exists(client, settings.qdrant_collection)
 
@@ -99,7 +99,7 @@ def index_products(
         
         logger.info(
             f"Upserted batch of {len(points)} text chunks.",
-            extra={"process": "text_indexing", "batch_size": len(points)}
+            extra={"phase": "text_indexing", "batch_size": len(points)}
         )
 
         # Clear batch buffers to free memory
@@ -153,7 +153,7 @@ def index_products(
     logger.info(
         "Text indexing completed successfully.",
         extra={
-            "process": "text_indexing",
+            "phase": "text_indexing",
             "indexed_chunks": total_indexed_chunks,
             "indexed_products": total_products,
         }
@@ -181,13 +181,13 @@ def index_product_images(
 
     logger.info(
         "Starting image indexing.",
-        extra={"process": "image_indexing", "product_id": product_id, "full_reset": full_reset}
+        extra={"phase": "image_indexing", "product_id": product_id, "full_reset": full_reset}
     )
 
     if full_reset:
         logger.info(
             f"Performing full reset of image collection {collection}.",
-            extra={"process": "image_indexing"}
+            extra={"phase": "image_indexing"}
         )
         delete_collection_if_exists(client, collection)
 
@@ -224,7 +224,7 @@ def index_product_images(
         image_url = str(row.get("image") or "").strip()
         if not image_url:
             total_skipped += 1
-            logger.info("Product has no image, skipping.", extra={"process": "image_indexing", "product_id": pid})
+            logger.info("Product has no image, skipping.", extra={"phase": "image_indexing", "product_id": pid})
             continue
 
         try:
@@ -254,20 +254,20 @@ def index_product_images(
             upsert_points(client, collection, [point])
             total_indexed += 1
             logger.info(
-                "Product image indexed successfully.", extra={"process": "image_indexing", "product_id": pid}
+                "Product image indexed successfully.", extra={"phase": "image_indexing", "product_id": pid}
             )
         except Exception:
             total_skipped += 1
             logger.error(
                 "Failed to index product image.",
-                extra={"process": "image_indexing", "product_id": pid, "image_url": image_url},
+                extra={"phase": "image_indexing", "product_id": pid, "image_url": image_url},
                 exc_info=True,
             )
 
     logger.info(
         "Image indexing completed.",
         extra={
-            "process": "image_indexing",
+            "phase": "image_indexing",
             "indexed_images": total_indexed,
             "skipped_images": total_skipped,
         }

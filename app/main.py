@@ -121,7 +121,7 @@ def _reindex_worker_loop() -> None:
             text_dur = int((time.monotonic() - text_start) * 1000)
             logger.info(
                 f"Finished text indexing phase in {text_dur}ms.",
-                extra={"process": "text_indexing", "job_id": job_id, "duration_ms": text_dur}
+                extra={"phase": "text_indexing", "job_id": job_id, "duration_ms": text_dur}
             )
             # Also index product images with CLIP when enabled
             image_result = None
@@ -136,12 +136,12 @@ def _reindex_worker_loop() -> None:
                     image_dur = int((time.monotonic() - image_start) * 1000)
                     logger.info(
                         f"Finished image indexing phase in {image_dur}ms.",
-                        extra={"process": "image_indexing", "job_id": job_id, "duration_ms": image_dur}
+                        extra={"phase": "image_indexing", "job_id": job_id, "duration_ms": image_dur}
                     )
                 except Exception:
                     logger.warning(
                         "Image indexing failed (non-fatal).",
-                        extra={"process": "image_indexing", "product_id": body.product_id, "job_id": job_id},
+                        extra={"phase": "image_indexing", "product_id": body.product_id, "job_id": job_id},
                         exc_info=True,
                     )
                     image_result = {"error": "Image indexing failed."}
